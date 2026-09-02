@@ -1253,7 +1253,7 @@ async function importarPlanilhaVendas(){
 
   // pega lançamentos já existentes desta unidade pra evitar duplicar
   const existentes = Object.values((allData[unidade] && allData[unidade].lancamentos) || {});
-  const jaExiste = (data, valor) => existentes.some(e => e.tipo==='entrada' && e.data===data && Math.abs((parseFloat(e.valor)||0) - valor) < 0.01);
+  const jaExiste = (data, valor, descricao) => existentes.some(e => e.tipo==='entrada' && e.data===data && Math.abs((parseFloat(e.valor)||0) - valor) < 0.01 && e.descricao===descricao);
 
   let totalImportado = 0, totalIgnorado = 0, resumoPorMes = [];
 
@@ -1287,14 +1287,14 @@ async function importarPlanilhaVendas(){
       const valor = parseFloat(row[colValor]);
       if(!iso || isNaN(valor) || valor<=0) continue;
 
-      if(jaExiste(iso, valor)){ totalIgnorado++; continue; }
-
       const plano = colPlano>-1 ? (row[colPlano]||'').toString().trim() : '';
       const vendedora = colVendedora>-1 ? (row[colVendedora]||'').toString().trim() : '';
       let descricao = 'Venda';
       if(plano && vendedora) descricao = `${plano} (${vendedora})`;
       else if(plano) descricao = plano;
       else if(vendedora) descricao = `Venda (${vendedora})`;
+
+      if(jaExiste(iso, valor, descricao)){ totalIgnorado++; continue; }
 
       const payload = {tipo:'entrada', descricao, valor, data: iso, recorrente:false, categoria:null, origemImportacao:true};
       await db.ref(`unidades/${unidade}/lancamentos`).push(payload);
