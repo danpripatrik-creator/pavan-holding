@@ -319,17 +319,23 @@
 
     <div id="viewImportar" style="display:none;">
       <div class="panel">
-        <h3>Importar Planilha de Vendas (Entradas)</h3>
+        <h3>Importar Planilha</h3>
         <p style="font-size:13px; color:var(--muted); margin-bottom:18px; line-height:1.6;">
-          Use pra importar as planilhas "Acompanhamento da Meta" (DANPRI ou PAVAN). O app lê todas as abas de mês
-          automaticamente e cria um lançamento de <b>Entrada</b> pra cada venda. Lançamentos com mesma data e valor
-          já existentes na unidade não são duplicados.
+          Use pra importar as planilhas "Acompanhamento da Meta" (vendas/entradas) ou "Planilha de Gastos" (despesas).
+          O app lê todas as abas de mês automaticamente. Lançamentos já importados antes não são duplicados.
         </p>
+        <div class="field">
+          <label>Tipo de planilha</label>
+          <select id="importTipoPlanilha">
+            <option value="vendas">Vendas (Acompanhamento da Meta — DANPRI/PAVAN)</option>
+            <option value="gastos">Gastos (Planilha de Gastos)</option>
+          </select>
+        </div>
         <div class="field">
           <label>Essa planilha é de qual unidade?</label>
           <select id="importUnidade">
-            <option value="franco">Franco da Rocha (planilha DANPRI)</option>
-            <option value="morato">Francisco Morato (planilha PAVAN)</option>
+            <option value="franco">Franco da Rocha</option>
+            <option value="morato">Francisco Morato</option>
             <option value="panobianco">Panobianco</option>
             <option value="vanelle">Vanelle</option>
           </select>
@@ -338,7 +344,7 @@
           <label>Arquivo (.xlsx)</label>
           <input type="file" id="importFileInput" accept=".xlsx,.xls">
         </div>
-        <button class="btn btn-primary" onclick="importarPlanilhaVendas()">Processar e Importar</button>
+        <button class="btn btn-primary" onclick="processarImportacao()">Processar e Importar</button>
         <button class="btn btn-danger" onclick="limparImportacoesAnteriores()" style="margin-left:10px;">🗑 Limpar importações anteriores desta unidade</button>
         <div id="importStatus" style="margin-top:16px; font-size:13px; color:var(--muted); white-space:pre-line;"></div>
       </div>
@@ -1261,6 +1267,12 @@ function excelDateToISO(val){
   return `${y}-${m}-${day}`;
 }
 
+function processarImportacao(){
+  const tipo = document.getElementById('importTipoPlanilha').value;
+  if(tipo === 'gastos') importarPlanilhaGastos();
+  else importarPlanilhaVendas();
+}
+
 async function importarPlanilhaVendas(){
   const unidade = document.getElementById('importUnidade').value;
   const fileInput = document.getElementById('importFileInput');
@@ -1311,7 +1323,7 @@ async function importarPlanilhaVendas(){
       const valor = parseFloat(row[colValor]);
       if(!iso || isNaN(valor) || valor<=0) continue;
 
-      const importKey = `${sheetName}__linha${i}`;
+      const importKey = `vendas__${sheetName}__linha${i}`;
       if(chavesExistentes.has(importKey)){ totalIgnorado++; continue; }
 
       const plano = colPlano>-1 ? (row[colPlano]||'').toString().trim() : '';
@@ -1334,6 +1346,124 @@ async function importarPlanilhaVendas(){
     `✓ Importação concluída.\n` +
     `Total importado: ${totalImportado} venda(s)\n` +
     (totalIgnorado>0 ? `Ignorado (já existia): ${totalIgnorado}\n` : '') +
+    (resumoPorMes.length ? '\n' + resumoPorMes.join('\n') : '');
+  fileInput.value = '';
+}
+
+/* ================= IMPORTAR PLANILHA DE GASTOS ================= */
+function ehTextoMaiusculo(label){
+  if(!label || typeof label !== 'string') return false;
+  const t = label.trim();
+  return t.length>1 && t === t.toUpperCase() && /[A-ZÀ-Ú]/.test(t);
+}
+
+function mapearCategoria(textoOriginal){
+  const t = textoOriginal.toUpperCase();
+  if(t.includes('CONTAS FIXAS')) return 'Contas Fixas';
+  if(t.includes('EMPRESA') || t.includes('INSS') || t.includes('FGTS') || t.includes('PESSOAL') || t.includes('SIMPLES')) return 'Funcionários';
+  if(t.includes('AUTOM') || t.includes('VEICUL')) return 'Automóveis';
+  if(t.includes('DIVERSA')) return 'Diversas';
+  // categoria não reconhecida: usa o texto original capitalizado, criando uma categoria nova
+  return textoOriginal.trim().charAt(0) + textoOriginal.trim().slice(1).toLowerCase();
+}
+
+async function importarPlanilhaGastos(){
+  const unidade = document.getElementById('importUnidade').value;
+  const fileInput = document.getElementById('importFileInput');
+  const statusEl = document.getElementById('importStatus');
+  const file = fileInput.files[0];
+  if(!file){ alert('Escolhe o arquivo .xlsx primeiro.'); return; }
+
+  statusEl.textContent = 'Lendo o arquivo...';
+
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, {type:'array', cellDates:true});
+
+  const existentes = Object.values((allData[unidade] && allData[unidade].lancamentos) || {});
+  const chavesExistentes = new Set(existentes.filter(e=>e.importKey).map(e=>e.importKey));
+  const categoriasAtuais = new Set((allData[unidade] && allData[unidade].categorias) || CATEGORIAS_PADRAO);
+  const categoriasNovas = new Set();
+
+  // tenta achar a aba certa: nome da unidade dentro do nome da aba
+  const nomesUnidade = {
+    franco: ['FRANCO'], morato: ['MORATO'], panobianco: ['PANOBIANCO'], vanelle: ['VANELLE']
+  };
+  const candidatos = workbook.SheetNames.filter(n => nomesUnidade[unidade].some(k => n.toUpperCase().includes(k)));
+  const sheetNames = candidatos.length ? candidatos : workbook.SheetNames;
+
+  let totalImportado = 0, totalIgnorado = 0, resumoPorMes = [];
+
+  for(const sheetName of sheetNames){
+    const ws = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true});
+
+    // linha 2 (índice 1) tem o nome do mês a cada bloco de 3 colunas
+    if(rows.length < 3) continue;
+    const headerRow = rows[1];
+    if(!headerRow) continue;
+
+    const blocos = [];
+    for(let c=0; c+2 < headerRow.length; c+=3){
+      const nomeMes = headerRow[c+2];
+      if(nomeMes && typeof nomeMes === 'string' && nomeMes.trim()){
+        blocos.push({labelCol:c, dateCol:c+1, valueCol:c+2, mes: nomeMes.trim()});
+      }
+    }
+    if(blocos.length === 0) continue;
+
+    for(const bloco of blocos){
+      let categoriaAtual = null;
+      let importadoMes = 0;
+      for(let i=2; i<rows.length; i++){
+        const row = rows[i];
+        if(!row) continue;
+        const label = row[bloco.labelCol];
+        const data = row[bloco.dateCol];
+        const valor = row[bloco.valueCol];
+        if(label===undefined || label===null || label==='') continue;
+        const labelStr = String(label).trim();
+        if(!labelStr) continue;
+
+        const dataEhPlaceholder = typeof data === 'string' && data.includes('*');
+
+        if(ehTextoMaiusculo(labelStr) && dataEhPlaceholder){
+          if(labelStr.toUpperCase().includes('DESPESA TOTAL')) break; // fim da seção de dados desse mês
+          categoriaAtual = mapearCategoria(labelStr);
+          continue;
+        }
+
+        const v = parseFloat(valor);
+        if(isNaN(v) || v<=0) continue;
+        const iso = excelDateToISO(data);
+        if(!iso) continue;
+
+        const importKey = `gastos__${sheetName}__${bloco.mes}__linha${i}`;
+        if(chavesExistentes.has(importKey)){ totalIgnorado++; continue; }
+
+        const categoria = categoriaAtual || 'Diversas';
+        if(!categoriasAtuais.has(categoria)) categoriasNovas.add(categoria);
+
+        const payload = {tipo:'gasto', descricao: labelStr, valor: v, data: iso, recorrente:false, categoria, origemImportacao:true, importKey};
+        await db.ref(`unidades/${unidade}/lancamentos`).push(payload);
+        chavesExistentes.add(importKey);
+        importadoMes++;
+        totalImportado++;
+      }
+      if(importadoMes>0) resumoPorMes.push(`${bloco.mes}: ${importadoMes} gasto(s)`);
+    }
+  }
+
+  // adiciona categorias novas encontradas na planilha que ainda não existiam nessa unidade
+  if(categoriasNovas.size>0){
+    const listaFinal = [...categoriasAtuais, ...categoriasNovas];
+    await db.ref(`unidades/${unidade}/categorias`).set(listaFinal);
+  }
+
+  statusEl.textContent =
+    `✓ Importação de gastos concluída.\n` +
+    `Total importado: ${totalImportado} gasto(s)\n` +
+    (totalIgnorado>0 ? `Ignorado (já existia): ${totalIgnorado}\n` : '') +
+    (categoriasNovas.size>0 ? `Novas categorias criadas: ${[...categoriasNovas].join(', ')}\n` : '') +
     (resumoPorMes.length ? '\n' + resumoPorMes.join('\n') : '');
   fileInput.value = '';
 }
