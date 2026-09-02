@@ -339,6 +339,7 @@
           <input type="file" id="importFileInput" accept=".xlsx,.xls">
         </div>
         <button class="btn btn-primary" onclick="importarPlanilhaVendas()">Processar e Importar</button>
+        <button class="btn btn-danger" onclick="limparImportacoesAnteriores()" style="margin-left:10px;">🗑 Limpar importações anteriores desta unidade</button>
         <div id="importStatus" style="margin-top:16px; font-size:13px; color:var(--muted); white-space:pre-line;"></div>
       </div>
     </div>
@@ -1224,6 +1225,27 @@ function salvarMeta(unidade){
 }
 
 /* ================= IMPORTAR PLANILHA DE VENDAS ================= */
+async function limparImportacoesAnteriores(){
+  const unidade = document.getElementById('importUnidade').value;
+  const lancs = (allData[unidade] && allData[unidade].lancamentos) || {};
+  const idsParaExcluir = Object.entries(lancs).filter(([id,l]) => l.origemImportacao).map(([id])=>id);
+
+  if(idsParaExcluir.length === 0){
+    alert('Não há lançamentos importados anteriormente nesta unidade.');
+    return;
+  }
+  if(!confirm(`Isso vai excluir ${idsParaExcluir.length} lançamento(s) de venda importados anteriormente da unidade ${UNIDADES[unidade]}. Lançamentos manuais (não importados) não são afetados. Continuar?`)){
+    return;
+  }
+
+  const statusEl = document.getElementById('importStatus');
+  statusEl.textContent = 'Excluindo importações antigas...';
+  for(const id of idsParaExcluir){
+    await db.ref(`unidades/${unidade}/lancamentos/${id}`).remove();
+  }
+  statusEl.textContent = `✓ ${idsParaExcluir.length} lançamento(s) removido(s). Agora clique em "Processar e Importar" de novo com o mesmo arquivo pra reimportar tudo certinho, sem risco de duplicar.`;
+}
+
 function excelDateToISO(val){
   // val pode vir como objeto Date (cellDates:true) ou como número serial do Excel
   let d;
@@ -1252,8 +1274,10 @@ async function importarPlanilhaVendas(){
   const workbook = XLSX.read(buffer, {type:'array', cellDates:true});
 
   // pega lançamentos já existentes desta unidade pra evitar duplicar
+  // usa um identificador único de linha (aba + posição), não o conteúdo — evita
+  // confundir vendas reais que coincidem em data/valor/plano/vendedora
   const existentes = Object.values((allData[unidade] && allData[unidade].lancamentos) || {});
-  const jaExiste = (data, valor, descricao) => existentes.some(e => e.tipo==='entrada' && e.data===data && Math.abs((parseFloat(e.valor)||0) - valor) < 0.01 && e.descricao===descricao);
+  const chavesExistentes = new Set(existentes.filter(e=>e.importKey).map(e=>e.importKey));
 
   let totalImportado = 0, totalIgnorado = 0, resumoPorMes = [];
 
@@ -1287,6 +1311,9 @@ async function importarPlanilhaVendas(){
       const valor = parseFloat(row[colValor]);
       if(!iso || isNaN(valor) || valor<=0) continue;
 
+      const importKey = `${sheetName}__linha${i}`;
+      if(chavesExistentes.has(importKey)){ totalIgnorado++; continue; }
+
       const plano = colPlano>-1 ? (row[colPlano]||'').toString().trim() : '';
       const vendedora = colVendedora>-1 ? (row[colVendedora]||'').toString().trim() : '';
       let descricao = 'Venda';
@@ -1294,11 +1321,9 @@ async function importarPlanilhaVendas(){
       else if(plano) descricao = plano;
       else if(vendedora) descricao = `Venda (${vendedora})`;
 
-      if(jaExiste(iso, valor, descricao)){ totalIgnorado++; continue; }
-
-      const payload = {tipo:'entrada', descricao, valor, data: iso, recorrente:false, categoria:null, origemImportacao:true};
+      const payload = {tipo:'entrada', descricao, valor, data: iso, recorrente:false, categoria:null, origemImportacao:true, importKey};
       await db.ref(`unidades/${unidade}/lancamentos`).push(payload);
-      existentes.push(payload); // evita duplicar dentro do próprio processamento
+      chavesExistentes.add(importKey);
       importadoMes++;
       totalImportado++;
     }
