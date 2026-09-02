@@ -1307,8 +1307,8 @@ async function importarPlanilhaVendas(){
         const idxValor = row.findIndex(c => (c||'').toString().trim().toLowerCase() === 'valor venda');
         if(idxValor > -1){
           headerRowIdx = i; colValor = idxValor;
-          colPlano = row.findIndex(c => (c||'').toString().trim().toLowerCase() === 'planos');
-          colVendedora = row.findIndex(c => (c||'').toString().trim().toLowerCase() === 'vendedora');
+          colPlano = row.findIndex(c => ['planos','plano'].includes((c||'').toString().trim().toLowerCase()));
+          colVendedora = row.findIndex(c => ['vendedora','recepcionista','recepcionista/vendedora'].includes((c||'').toString().trim().toLowerCase()));
           break;
         }
       }
