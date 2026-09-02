@@ -209,7 +209,7 @@
     <div class="nav-item" data-page="anual" onclick="selectPage('anual')"><span class="dot"></span> Fechamento Anual</div>
     <div class="nav-item" data-page="comparacao" onclick="selectPage('comparacao')"><span class="dot"></span> Comparação</div>
     <div class="nav-item" data-page="metas" onclick="selectPage('metas')"><span class="dot"></span> Metas</div>
-    <div class="nav-item" data-page="importar" onclick="selectPage('importar')"><span class="dot"></span> Importar Vendas</div>
+    <div class="nav-item" data-page="importar" onclick="selectPage('importar')"><span class="dot"></span> Importar Planilha</div>
 
     <div class="sidebar-bottom">
       <div class="user-chip" onclick="doLogout()">
@@ -530,7 +530,7 @@ function selectPage(page){
   document.querySelectorAll('.nav-item[data-unit]').forEach(el=>el.classList.remove('active'));
   document.querySelectorAll('.nav-item[data-page]').forEach(el=>el.classList.remove('active'));
   document.querySelector(`.nav-item[data-page="${page}"]`).classList.add('active');
-  const titles = {lancamentos:'Lançamentos', categorias:'Categorias', anual:'Fechamento Anual', comparacao:'Comparação entre Unidades', metas:'Metas de Lucro', importar:'Importar Vendas'};
+  const titles = {lancamentos:'Lançamentos', categorias:'Categorias', anual:'Fechamento Anual', comparacao:'Comparação entre Unidades', metas:'Metas de Lucro', importar:'Importar Planilha'};
   document.getElementById('pageTitle').textContent = titles[page];
   document.getElementById('topActions').style.display = page === 'lancamentos' ? 'flex' : 'none';
   showView(page);
