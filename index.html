@@ -1351,6 +1351,15 @@ async function importarPlanilhaVendas(){
 }
 
 /* ================= IMPORTAR PLANILHA DE GASTOS ================= */
+const MESES_NUM = {
+  'JANEIRO':1,'FEVEREIRO':2,'MARCO':3,'MARÇO':3,'ABRIL':4,'MAIO':5,'JUNHO':6,'JULHO':7,
+  'AGOSTO':8,'SETEMBRO':9,'OUTUBRO':10,'NOVEMBRO':11,'DEZEMBRO':12
+};
+function mesNomeParaNumero(nomeMes){
+  const chave = nomeMes.trim().toUpperCase().replace(/[^A-ZÇ]/g,'');
+  return MESES_NUM[chave] || null;
+}
+
 function ehTextoMaiusculo(label){
   if(!label || typeof label !== 'string') return false;
   const t = label.trim();
@@ -1434,8 +1443,21 @@ async function importarPlanilhaGastos(){
 
         const v = parseFloat(valor);
         if(isNaN(v) || v<=0) continue;
-        const iso = excelDateToISO(data);
-        if(!iso) continue;
+
+        // usa o MÊS DA COLUNA/BLOCO (não da célula de data) — a planilha organiza
+        // gastos por coluna de mês, e às vezes a data digitada não bate exatamente
+        // com a coluna onde o item está. Seguimos a coluna, igual o "DESPESA TOTAL".
+        let ano, dia;
+        if(data instanceof Date){
+          ano = data.getUTCFullYear();
+          dia = data.getUTCDate();
+        } else {
+          continue; // sem data real, não dá pra confiar no item
+        }
+        const mesNum = mesNomeParaNumero(bloco.mes);
+        if(!mesNum) continue;
+        const diaValido = Math.min(dia, 28); // evita datas inválidas tipo 31 em mês de 30 dias
+        const iso = `${ano}-${String(mesNum).padStart(2,'0')}-${String(diaValido).padStart(2,'0')}`;
 
         const importKey = `gastos__${sheetName}__${bloco.mes}__linha${i}`;
         if(chavesExistentes.has(importKey)){ totalIgnorado++; continue; }
